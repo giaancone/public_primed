@@ -9,11 +9,11 @@ Runs the full fraction x seed grid and writes one JSON row per (fraction, seed).
 skips rows already present, and the JSON is rewritten after every cell, so an interrupted run
 loses at most one cell. `--ckpt-dir` additionally saves per-epoch weights.
 
-  python scripts/train_ftpc.py --config configs/dch_ftpc.yaml --root $DCH \\
+  python scripts/train_teacher_dch.py --config configs/dch_ftpc.yaml --root $DCH \\
       --device cuda --seeds 0 --out runs/dch_ftpc_s0.json
 
   # No GPU and no data: fabricates a fixture matching the real file schema.
-  python scripts/train_ftpc.py --config configs/dch_ftpc.yaml --stub --out /tmp/ftpc.json
+  python scripts/train_teacher_dch.py --config configs/dch_ftpc.yaml --stub --out /tmp/ftpc.json
 
 Pure ASCII.
 """
@@ -29,7 +29,7 @@ import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src import data_loader                 # noqa: E402
-from src import ft_peakcount as fpc         # noqa: E402
+from src import teacher_dch as tdch         # noqa: E402
 from src import separation as sep_mod       # noqa: E402
 
 
@@ -165,7 +165,7 @@ def main():
                 os.makedirs(ck_dir, exist_ok=True)
                 ckpt = os.path.join(ck_dir, "%s_ftpc_f%s_s%d.pt" % (ds, frac, seed))
             plot_path = os.path.join(plot_dir, "%s_ftpc_f%s_s%d_loss.png" % (ds, frac, seed))
-            model, m = fpc.train_peakcount(X, ps, cnt, fcfg, seed=seed, fraction=frac,
+            model, m = tdch.train_peakcount(X, ps, cnt, fcfg, seed=seed, fraction=frac,
                                            device=args.device, stub=fcfg.get("stub", False),
                                            input_len=L, verbose=args.verbose,
                                            ckpt_path=ckpt, ckpt_every=int(fcfg.get("ckpt_every", 1)),
@@ -174,10 +174,10 @@ def main():
             # sharded per-seed launch every process has seeds=[s] so min==s, which
             # would race all seeds onto the shared teacher file -- gate on seed 0).
             if ck_dir and frac == canonical_frac and seed == 0:   # global max, not the shard's
-                fpc.save_peakcount(os.path.join(ck_dir, "%s_ftpc_teacher.pt" % ds), model, fcfg, L)
+                tdch.save_peakcount(os.path.join(ck_dir, "%s_ftpc_teacher.pt" % ds), model, fcfg, L)
             # one batched forward per eval set (count head + peak-map count together)
-            ch_p, pk_p = fpc.eval_counts(model, Xp, device=args.device)
-            ch_k, pk_k = fpc.eval_counts(model, Xk, device=args.device)
+            ch_p, pk_p = tdch.eval_counts(model, Xp, device=args.device)
+            ch_k, pk_k = tdch.eval_counts(model, Xk, device=args.device)
             sep_head = sep_mod.separation_power(ch_p, ch_k, length_scale)["separation"]
             sep_peak = sep_mod.separation_power(pk_p, pk_k, length_scale)["separation"]
             row = {"fraction": frac, "seed": seed, "separation": sep_head,

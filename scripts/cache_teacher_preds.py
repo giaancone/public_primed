@@ -37,7 +37,7 @@ import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src import data_loader                 # noqa: E402
-from src import fs_baseline as fs           # noqa: E402
+from src import student as st           # noqa: E402
 
 
 def main():
@@ -176,17 +176,17 @@ def _one_teacher(scheme, config, teacher, X, y, device, stub, batch, regions):
     """Build one teacher and return (preds (N,n_tgt), embeds (N,D) or (N,K,D), model).
     embeds are the pooled global embedding, or K trace-region embeddings if regions>0."""
     if scheme == "st":
-        model, ck = fs.load_model(teacher, device=device)
+        model, ck = st.load_model(teacher, device=device)
         if ck["length"] != X.shape[1] or ck["n_targets"] != y.shape[1]:
             raise SystemExit("[cache] teacher/data shape mismatch")
-        preds = fs.predict(model, X, device=device)
-        embeds = _penultimate(model, fs._standardize(X), device)
+        preds = st.predict(model, X, device=device)
+        embeds = _penultimate(model, st._standardize(X), device)
     elif scheme == "ft":
         import torch as _th
-        from src import ft_finetune as ftm
+        from src import teacher as tch
         fcfg = config["ft"]
-        backbone = ftm._build_backbone(fcfg, X.shape[1], device, stub)
-        model = ftm.FineTuneModel(backbone, fcfg.get("head_hidden", [128]), y.shape[1]).to(device)
+        backbone = tch._build_backbone(fcfg, X.shape[1], device, stub)
+        model = tch.FineTuneModel(backbone, fcfg.get("head_hidden", [128]), y.shape[1]).to(device)
         if teacher:
             import torch
             ck = torch.load(teacher, map_location=device, weights_only=False)
@@ -195,8 +195,8 @@ def _one_teacher(scheme, config, teacher, X, y, device, stub, batch, regions):
         elif not stub:
             raise SystemExit("[cache] --scheme ft needs --teacher (or --stub)")
         _t = _phase("pass 1/2: predictions over %d events (batch %s) ..." % (len(X), batch))
-        # Eval() + no_grad at the call site. ft_finetune._predict_batched (:544) does
-        # neither, unlike ft_peakcount._predict_raw (:285-290) which does both, and _one_teacher
+        # Eval() + no_grad at the call site. teacher._predict_batched (:544) does
+        # neither, unlike teacher_dch._predict_raw (:285-290) which does both, and _one_teacher
         # never called .eval() -- so a freshly built model predicted in train mode while building
         # an autograd graph it immediately threw away. There is no Dropout or BatchNorm in
         # FineTuneModel (Linear + gelu only), so the arithmetic was never wrong; the cost was
@@ -204,30 +204,30 @@ def _one_teacher(scheme, config, teacher, X, y, device, stub, batch, regions):
         # other callers whose behavior must not move.
         model.eval()
         with _th.no_grad():
-            preds = ftm.predict(model, X, device=device, batch=batch)
+            preds = tch.predict(model, X, device=device, batch=batch)
         _t = _phase("pass 1/2 done; pass 2/2: embeddings ...", _t)
         with _th.no_grad():
             embeds = (_regional_embed(model, X, regions, device, batch or 64) if regions
-                      else ftm.predict_embed(model, X, device=device, batch=batch))
+                      else tch.predict_embed(model, X, device=device, batch=batch))
         _phase("pass 2/2 done", _t)
     else:                                                          # ftpc
-        from src import ft_peakcount as fpc
+        from src import teacher_dch as tdch
         fcfg = config["ftpc"]
         if not teacher and not stub:
             raise SystemExit("[cache] --scheme ftpc needs --teacher (the ftpc ckpt)")
         if teacher:
-            model, _ = fpc.load_peakcount(teacher, fcfg, device=device, stub=stub)
+            model, _ = tdch.load_peakcount(teacher, fcfg, device=device, stub=stub)
             print("[cache] loaded ftpc weights from %s" % teacher)
         else:
             L = X.shape[1]
-            bb = fpc._build_backbone(fcfg, L, device, True)
-            model = fpc.PeakCountModel(bb, L, fcfg.get("head_hidden", [128]),
+            bb = tdch._build_backbone(fcfg, L, device, True)
+            model = tdch.PeakCountModel(bb, L, fcfg.get("head_hidden", [128]),
                                        n_classes=fcfg.get("n_classes", 3)).to(device)
         _t = _phase("pass 1/2: predictions over %d events (batch %s) ..." % (len(X), batch))
-        preds = fpc.predict_counts(model, X, device=device, batch=batch).reshape(-1, 1)
+        preds = tdch.predict_counts(model, X, device=device, batch=batch).reshape(-1, 1)
         _t = _phase("pass 1/2 done; pass 2/2: embeddings ...", _t)
         embeds = (_regional_embed(model, X, regions, device, batch or 64) if regions
-                  else fpc.predict_embed(model, X, device=device, batch=batch))
+                  else tdch.predict_embed(model, X, device=device, batch=batch))
         _phase("pass 2/2 done", _t)
     return np.asarray(preds, np.float32), np.asarray(embeds, np.float32), model
 

@@ -8,7 +8,7 @@
 #   run:
 #     export HDF5_USE_FILE_LOCKING=false
 #     export HF_HOME=<cache_dir>/hf_cache HF_HUB_OFFLINE=1
-#     python scripts/train_ft_dro.py --config configs/dro_bso_ft_2species.yaml \
+#     python scripts/train_teacher_dro.py --config configs/dro_bso_ft_2species.yaml \
 #       --root $DRO --device cuda --verbose --seeds 0,1,2 --resume \
 #       --ckpt-dir <ckpt_dir> --epochs-per-run 1 \
 #       --out runs/dro_ft_2species.json

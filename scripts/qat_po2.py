@@ -105,7 +105,7 @@ def wmse(weights, ratio_weight=0.0, ratio_cols=(0, 1)):
     lost it, because the ratio is a relationship between c and s, not a per-channel quantity.
     The compression loss must match the training loss.
 
-    Same stable cross-product as fs_baseline: (pc*ts - ps*tc) is zero exactly when the c and s
+    Same stable cross-product as student: (pc*ts - ps*tc) is zero exactly when the c and s
     relative errors agree (and so cancel in R = c/s), normalized by the batch-mean tc*ts so a
     near-zero true c or s cannot blow it up. ratio_weight=0 -> byte-identical to before."""
     import tensorflow as tf

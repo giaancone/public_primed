@@ -14,7 +14,7 @@ torch
 
 # The foundation-model backbone.
 #
-# Pinned, because src/ft_finetune.py depends on two things that are not part of a stable
+# Pinned, because src/teacher.py depends on two things that are not part of a stable
 # public API: the TimesFM_2p5_200M_torch loader, and revin / update_running_stats from
 # timesfm.torch.util, which it calls directly to reproduce the preprocessing the forecast
 # path applies internally. A release that moves either will break the run, or change the

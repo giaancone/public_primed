@@ -28,7 +28,7 @@ import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src import data_loader                 # noqa: E402
-from src import fs_baseline as fs           # noqa: E402
+from src import student as st           # noqa: E402
 from src import separation as sep_mod       # noqa: E402
 from src import dro_metric                  # noqa: E402
 
@@ -39,12 +39,12 @@ def _save_student(args, scfg, student, length, n_targets, frac, seed, dataset,
 
     layout matters. The export step reads `model` / `scfg` / `input_len` /
     `n_targets`, not the `state_dict` /
-    `arch_cfg` / `length` layout of fs_baseline.save_model. Writing the wrong one fails at the
+    `arch_cfg` / `length` layout of student.save_model. Writing the wrong one fails at the
     next step, an hour later, rather than here.
 
     `scfg["_x_scaler"]` must travel with the weights. The student is trained under global
     MinMax fitted on its own train split; predicting it later under per-event z-scoring gives
-    meaningless numbers silently (fs_baseline.py:556). export_student_npz copies it into the
+    meaningless numbers silently (student.py:556). export_student_npz copies it into the
     npz meta, and pt_to_keras carries it into the .h5 pipeline.
     """
     d = getattr(args, "save_students", "")
@@ -52,11 +52,11 @@ def _save_student(args, scfg, student, length, n_targets, frac, seed, dataset,
         return None
     import torch
     os.makedirs(d, exist_ok=True)
-    # The scaler does not come back in scfg. fs_baseline.py:850 does `cfg = dict(cfg)` before
+    # The scaler does not come back in scfg. student.py:850 does `cfg = dict(cfg)` before
     # inserting `_x_scaler`, so the fit lands on a local copy and the caller's scfg never sees
     # it. (That copy is deliberate -- mutating the caller would leak seed 0's scaler into every
     # later seed via the `is None` guard.) The fitted scaler is attached to the model object at
-    # fs_baseline.py:1037, and `state_dict()` drops plain attributes, so read it off the model
+    # student.py:1037, and `state_dict()` drops plain attributes, so read it off the model
     # here. Without this the .pt is unusable for compression: export_student_npz has no scaler
     # to copy into the npz meta and the compressed model is scored under the wrong input
     # normalization, silently.
@@ -122,7 +122,7 @@ def _resume_state(args, tag):
     finished, so an allocation that expired mid-cell threw away all 8 seeds -- hours of GPU time
     for nothing, repeatedly. Now each seed is appended and flushed as it completes: the most any
     interruption can cost is one seed. Mirrors the pattern already proven in
-    scripts/train_ftpc.py:143-154.
+    scripts/train_teacher_dch.py:143-154.
 
     Resume is keyed on (fraction, seed), so re-running the same command picks up exactly where it
     stopped and re-running a different recipe into the same --out would silently mix two
@@ -250,10 +250,10 @@ def _train_with_retries(fs, args, X, y, teacher, scfg, seed, fraction, **kw):
     """
     gate = getattr(args, "fail_val_loss", None)
     if gate is None:
-        return fs.train_student(X, y, teacher, scfg, seed=seed, fraction=fraction, **kw)
+        return st.train_student(X, y, teacher, scfg, seed=seed, fraction=fraction, **kw)
 
     if not scfg.get("select_best_val"):
-        # best_val_loss is only recorded under --select-best-val (fs_baseline.py:1163). Without
+        # best_val_loss is only recorded under --select-best-val (student.py:1163). Without
         # it the gate has nothing to read and would silently accept every run.
         raise SystemExit("--fail-val-loss requires --select-best-val (no best_val_loss recorded)")
 
@@ -267,7 +267,7 @@ def _train_with_retries(fs, args, X, y, teacher, scfg, seed, fraction, **kw):
     best_student, best_m, best_score = None, None, float("inf")
     for attempt in range(max_attempts):
         s = seed + RETRY_SEED_STRIDE * attempt
-        student, m = fs.train_student(X, y, teacher, scfg, seed=s, fraction=fraction, **kw)
+        student, m = st.train_student(X, y, teacher, scfg, seed=s, fraction=fraction, **kw)
         vl = m.get("best_val_loss")
         tried.append(s)
         losses.append(vl)
@@ -410,12 +410,12 @@ def run_dch(args, config, scfg, teacher, X, y):
             if pion is not None:
                 def _sep(Xp_, Xk_):
                     # no cfg/scaler passed on purpose: train_student stamps _x_cfg/_x_scaler
-                    # onto the model (fs_baseline.py:1037) and predict() falls back to them,
+                    # onto the model (student.py:1037) and predict() falls back to them,
                     # so the global-MinMax transform travels with the student. Passing scfg
                     # here would also work but would re-read a dict whose _x_scaler the
-                    # caller never received (fs_baseline.py:850 rebinds a local copy).
-                    a_ = fs.predict(student, Xp_, device=args.device).ravel()
-                    b_ = fs.predict(student, Xk_, device=args.device).ravel()
+                    # caller never received (student.py:850 rebinds a local copy).
+                    a_ = st.predict(student, Xp_, device=args.device).ravel()
+                    b_ = st.predict(student, Xk_, device=args.device).ravel()
                     return float(sep_mod.separation_power(a_, b_, length_scale)["separation"])
                 row["separation"] = _sep(pion[0], kaon[0])
                 if getattr(args, "_pika_val", None) is not None:
@@ -423,7 +423,7 @@ def run_dch(args, config, scfg, teacher, X, y):
                     row["val_sep"] = _sep(args._pika_val[0], args._pika_val[1])
             # The measured loss split -- what the (alpha, feat_weight) sweep is actually
             # sweeping. Carried per row so an arm can be described by the balance it achieved
-            # rather than by the raw weight that produced it (fs_baseline.train_student).
+            # rather than by the raw weight that produced it (student.train_student).
             for _k in ("loss_shares_final", "feat_share_final",
                        "best_epoch", "best_val_loss", "last_epoch"):
                 if _k in m:
@@ -494,7 +494,7 @@ def run_dro(args, config, scfg, teacher, X, y):
             row = {"fraction": frac, "seed": seed, **m}
             _save_student(args, scfg, student, X.shape[1], y.shape[1], frac, seed,
                           dataset="dro", target_names=tnames)
-            pe = fs.predict(student, Xh, device=args.device)
+            pe = st.predict(student, Xh, device=args.device)
             row["err68_holdout"] = dro_metric.dro_metrics(pe, yh, tnames, divisors)
             results.append(row)
             # Flush every seed -- see run_dch.
@@ -521,7 +521,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
     ap.add_argument("--root", required=True, help="data root")
-    ap.add_argument("--teacher", default=None, help="st/fs model .pt (fs.load_model); "
+    ap.add_argument("--teacher", default=None, help="st/fs model .pt (st.load_model); "
                     "predicted live")
     ap.add_argument("--teacher-preds", default=None, help="cached teacher soft targets "
                     ".npz (from cache_teacher_preds.py) -- teacher-agnostic (e.g. ft)")
@@ -659,7 +659,7 @@ def main():
     if args.downsample is not None:
         # DRO reads data.downsample in _dro_prep_wave. DCH has no such key -- its student
         # decimation goes through data.student_downsample (src/data_loader._dch_window ->
-        # liangyu_prep.downsample). Route the same flag to whichever the dataset uses, so
+        # student_prep.downsample). Route the same flag to whichever the dataset uses, so
         # `--downsample 5` means the same thing on both detectors.
         #
         # Why not put it in the config's data block: configs/dch_ftpc.yaml is shared with the
@@ -719,7 +719,7 @@ def main():
     args.alpha, args.feat_weight = resolve_arm(args.distill_mode, args.alpha, args.feat_weight)
 
     if args.teacher:                                   # live model teacher (st/fs)
-        teacher, ck = fs.load_model(args.teacher, device=args.device)
+        teacher, ck = st.load_model(args.teacher, device=args.device)
         n_teacher = sum(p.numel() for p in teacher.parameters())
         exp_len, exp_ntgt, tsrc = ck["length"], ck["n_targets"], ck["arch_cfg"].get("arch")
     else:                                              # cached preds teacher (any, incl ft)
@@ -786,7 +786,7 @@ def main():
                              "deployed student is compressed at. Raise --count-divisor."
                              % (_mx, _cdiv))
     n_student = sum(p.numel() for p in
-                    fs.build_model(scfg, X.shape[1], y.shape[1]).parameters())
+                    st.build_model(scfg, X.shape[1], y.shape[1]).parameters())
     ratio = ("%.0fx smaller than teacher" % (n_teacher / max(n_student, 1))
              if n_teacher > 0 else "teacher size unknown from cache")
     print("[sd] student: %d params (%s)" % (n_student, ratio))

@@ -393,7 +393,7 @@ def finetune_masked(model, X, y, masks, cfg, seed=0, fraction=100.0, device="cpu
     rng = np.random.default_rng(seed)
     # train/recover mismatch guard. This also called _standardize() unconditionally. The
     # prune-recovery path trains the dense model with
-    # fs.train_student -- which does honor input_norm: global -- and then recovered it here
+    # st.train_student -- which does honor input_norm: global -- and then recovered it here
     # with per-event z-scored inputs. The recovery step was optimizing against an input the
     # deployed model never sees. The model carries its own transform (model._x_cfg /
     # model._x_scaler, stamped by train_student), so prefer that when present and refuse to
@@ -564,7 +564,7 @@ def train_student(X, y, teacher, cfg, seed=0, fraction=100.0, device="cpu",
     # both. `label_seed` splits them so the labeled subset can be pinned to the TEACHER's draw.
     #
     # Why that matters. The teacher at fraction f chose its labels with default_rng(its seed)
-    # (ft_finetune.py:351-357, ft_peakcount.py:143-150 -- identical code to this). With a
+    # (teacher.py:351-357, teacher_dch.py:143-150 -- identical code to this). With a
     # different student seed the two draws are disjoint, so a point labeled "1%" was informed by
     # the teacher's 1,000 events and the student's other 1,000: 2% of the truth behind a 1% claim.
     # label_seed=0 makes the student reuse the teacher's exact events, so the chain consumes f%

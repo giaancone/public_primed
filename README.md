@@ -17,17 +17,21 @@ Two tasks are supported:
 ```
 src/         library code
   data_loader.py    read waveforms, downsample, apply target divisors
-  ft_finetune.py    foundation-model backbone and DRO teacher training
-  ft_peakcount.py   DCH teacher (per-sample head plus a pooled count head)
-  fs_baseline.py    student training: from-scratch and distilled arms
+  teacher.py        foundation-model backbone and DRO teacher training
+  teacher_dch.py    DCH teacher (per-sample head plus a pooled count head)
+  student.py        student training: from-scratch and distilled arms
   semi_distill.py   distillation over the unlabeled pool
   metrics.py        shared regression metrics and the weighted loss
   separation.py     DCH metric
   dro_metric.py     DRO metrics
-  liangyu_prep.py   student input decimation and scaling
+  student_prep.py   student input decimation and scaling
 
 scripts/     entry points, one per pipeline stage
-configs/     one config per detector, holding both teacher and student settings
+
+configs/
+  dch_ftpc.yaml             DCH teacher and student
+  dro_bso_ft_2species.yaml  DRO teacher
+  dro_bso_2species.yaml     DRO student
 ```
 
 ## Requirements
@@ -42,10 +46,10 @@ pip install -r requirements-compress.txt    # pruning, QAT, synthesis
 
 Synthesis also needs a Xilinx Vitis HLS installation on `PATH`.
 
-The backbone checkpoint is pinned in the configs (`google/timesfm-2.5-200m-pytorch`),
-but the `timesfm` package version is not: `ft_finetune.py` uses internals of
-`timesfm.torch.util`, so a different release may change preprocessing or fail
-outright. Pin it to the version you used.
+The backbone checkpoint is pinned in the configs (`google/timesfm-2.5-200m-pytorch`)
+and the `timesfm` package is pinned in `requirements-train.txt`. Both matter:
+`teacher.py` calls internals of `timesfm.torch.util`, so another release may
+change the preprocessing or fail outright.
 
 ## License
 
@@ -58,8 +62,10 @@ per-sample ionization tags; the DRO inputs are `.h5` files holding a summed wave
 and a label array. The glob patterns and key names are in the `data` block of each
 config. Point `--root` at the directory containing them.
 
-Both training entry points accept `--stub`, which substitutes a small backbone so the
-loader, model and metric paths run without a GPU.
+Both training entry points accept `--stub`, which swaps in a small backbone so the
+loader, model and metric paths run without a GPU. `train_teacher_dch.py --stub` also
+fabricates a DCH-schema fixture and so needs no data at all; `train_teacher_dro.py --stub`
+still reads from `--root`.
 
 ## Running the pipeline
 
@@ -70,10 +76,10 @@ The four stages run in order. Substitute the detector's data directory for `$DCH
 rewritten after each cell, and `--resume` skips completed ones.
 
 ```
-python scripts/train_ftpc.py   --config configs/dch_ftpc.yaml \
+python scripts/train_teacher_dch.py   --config configs/dch_ftpc.yaml \
     --root $DCH --device cuda --out runs/dch_teacher.json
 
-python scripts/train_ft_dro.py --config configs/dro_bso_ft_2species.yaml \
+python scripts/train_teacher_dro.py --config configs/dro_bso_ft_2species.yaml \
     --root $DRO --device cuda --out runs/dro_teacher.json
 ```
 
@@ -97,30 +103,54 @@ python scripts/train_distill.py --config configs/dro_bso_2species.yaml \
     --root $DRO --scheme fc_little --downsample 10 --context-len 628 \
     --teacher-preds <cache>.npz --semi --distill-mode both \
     --alpha 0.5 --feat-weight 0.001 --feat-center mean \
-    --label-seed 1 --steps 140000 --batch-size 256 \
+    --label-seed 1 --select-best-val --steps 140000 --batch-size 256 \
     --device cuda --out runs/dro_student.json
 
 # from-scratch control: same command with --distill-mode labels, no --semi
 ```
 
-`scripts/run_semi_sweep.sh` (DCH) and `scripts/run_2species_students.sh` (DRO) run
-the full fraction-by-seed sweep for both arms, and compute the control's batch size
-and epoch count so that both arms get the same number of optimizer steps.
+DCH students take `--downsample 5` instead (3008 to 602), plus two flags that decide
+whether the number is comparable at all: `--sel-val-frac 0.3`, which holds back a
+disjoint selection split, and `--count-divisor 53`. Both are DCH-only; DRO uses a
+random holdout and takes neither.
 
-**4. Compress and synthesize.**
+`scripts/run_dch_students.sh` (DCH) and `scripts/run_dro_students.sh` (DRO) run
+the full fraction-by-seed sweep for both arms, apply each detector's flags, and
+compute the control's batch size and epoch count so that both arms get the same
+number of optimizer steps.
+
+**4. Compress and synthesize.** One command per detector. `--prune-to` prunes the
+float student here; pass an already-pruned model and omit it to go straight to QAT.
+`--po2-layers` selects which dense layers get power-of-two kernels — omitted means
+all of them.
 
 ```
+python scripts/qat_po2.py --detector dch --cache <cache>.npz --meta <cache_meta>.json \
+    --pruned-model <student>.h5 --prune-to 0.6 \
+    --kernel-quantizer po2 --bits 10 --target-divisor 53 \
+    --out runs/qat_dch.json
+
 python scripts/qat_po2.py --detector dro --cache <cache>.npz --meta <cache_meta>.json \
-    --pruned-model <student>.h5 --bits 11 --po2-layers 0 --out runs/qat.json
+    --pruned-model <student>.h5 --prune-to 0.1 \
+    --kernel-quantizer po2 --bits 11 --po2-layers 0 \
+    --target-weights 4,1,0.3 --epochs 150 \
+    --out runs/qat_dro.json
 
 python scripts/hls4ml_sweep.py --models-dir <dir> --out hls4ml_results.json
 ```
 
+`--target-divisor 53` is required for DCH and `--target-weights` for DRO; both are
+checked, and the DRO weights have to pair with the divisors in the config. Run-to-run
+spread at a fixed operating point is larger than the gap between bit widths, so
+compress several times and select on validation loss rather than reading one run.
+
 ## Notes
 
-The student input width is set by `--downsample` and `--context-len` on the command
-line, not by the config. Omitting them trains a model with a different number of
-parameters than the one reported, and nothing fails.
+The student input width comes from `--downsample` and `--context-len`, which override
+the config. `dch_ftpc.yaml` sets neither, so the DCH flag is required; the DRO config
+carries 10 and 640 while the reported student uses `--context-len 628`. Getting this
+wrong trains a model with a different number of parameters than the one reported, and
+nothing fails.
 
 Target divisors and per-target loss weights are a single decision. The divisor enters
 the loss squared, and err68 is invariant to it, so changing one without the other
@@ -128,3 +158,9 @@ skews training while every reported metric still looks correct.
 
 Validation is taken from inside the labeled budget rather than in addition to it, so
 a stated label fraction is the total amount of truth consumed.
+
+DCH training and evaluation are separate productions. Training reads
+`processed_data_train/` with no momentum filter; `pion/` and `kaon/` are filtered to
+`eval.momentum` +/- `eval.mom_tol` when loaded, so the filter applies to evaluation
+only. DRO has no equivalent split -- its holdout is carved from the same pool the
+fractions are drawn from.

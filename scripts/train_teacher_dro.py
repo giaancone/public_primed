@@ -1,6 +1,6 @@
 """Fine-tune the foundation model on the dual-readout C/S/t0 regression.
 
-Three targets are regressed jointly under a weighted MSE (`ft.target_weights`), so the
+Three targets are regressed jointly under a weighted MSE (the config `ft` block's `target_weights`), so the
 low-signal timing target does not dilute the energy fit. Scoring is err68 on c, s and the
 C/S ratio plus a t0 timing resolution in ns -- see src/dro_metric.py.
 
@@ -9,7 +9,7 @@ on, so no cell in the grid can have seen an evaluation event. `--external-eval` 
 external per-species slice instead.
 
 The backbone, head and training loop are shared with the drift-chamber runner
-(src/ft_finetune.py); only the target count, the loss weighting and the metric differ.
+(src/teacher.py); only the target count, the loss weighting and the metric differ.
 
 Runs the full fraction x seed grid. `--fractions` / `--seeds` subset it, `--resume` skips
 completed pairs, and the JSON is rewritten after each cell. `--ckpt-dir` saves per-epoch
@@ -28,7 +28,7 @@ import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src import data_loader                 # noqa: E402
-from src import ft_finetune as ft           # noqa: E402
+from src import teacher as tch           # noqa: E402
 from src import dro_metric                  # noqa: E402
 
 
@@ -88,7 +88,7 @@ def main():
     with open(args.config) as f:
         config = yaml.safe_load(f)
     if config.get("dataset") != "dro":
-        raise SystemExit("train_ft_dro.py is DRO-only (use train_ft.py for DCH).")
+        raise SystemExit("train_teacher_dro.py is DRO-only (use train_teacher_dch.py for DCH).")
     fcfg = dict(config["ft"])
     if args.fractions:
         fcfg["fractions"] = [_num(x) for x in args.fractions.split(",")]
@@ -167,7 +167,7 @@ def main():
                 ckpt_path = os.path.join(args.ckpt_dir, "ftdro_f%s_s%s.pt" % (frac, seed))
             plot_path = os.path.join(plot_dir, "%s_f%s_s%s_loss.png"
                                      % (config.get("name", "dro_ft"), frac, seed))
-            model, m = ft.train_ft(pool_X, pool_y, fcfg, seed=seed, fraction=frac,
+            model, m = tch.train_ft(pool_X, pool_y, fcfg, seed=seed, fraction=frac,
                                    device=args.device, stub=args.stub, input_len=input_len,
                                    verbose=args.verbose, ckpt_path=ckpt_path,
                                    ckpt_every=fcfg.get("ckpt_every", 1), plot_path=plot_path,
@@ -195,7 +195,7 @@ def main():
                    "warmup_frac": m.get("warmup_frac"),
                    "first_loss": m.get("first_loss"), "last_loss": m.get("last_loss")}
             for name, Xe, te in eval_sets:
-                pe = ft.predict(model, Xe, device=args.device)
+                pe = tch.predict(model, Xe, device=args.device)
                 row["err68_%s" % name] = dro_metric.dro_metrics(pe, te, tnames, divisors)
             results.append(row)
             done.add((frac, seed))

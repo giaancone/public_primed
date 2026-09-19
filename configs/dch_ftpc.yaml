@@ -8,7 +8,7 @@
 # Seed-parallel on a 4-GPU node:
 #   export HF_HOME=<cache_dir>/hf_cache; mkdir -p logs
 #   for s in 0 1 2; do
-#     CUDA_VISIBLE_DEVICES=$s nohup python scripts/train_ftpc.py --config configs/dch_ftpc.yaml \
+#     CUDA_VISIBLE_DEVICES=$s nohup python scripts/train_teacher_dch.py --config configs/dch_ftpc.yaml \
 #       --root $DCH --device cuda --verbose --seeds $s --resume \
 #       --ckpt-dir <ckpt_dir> --out runs/dch_ftpc_s$s.json \
 #       > logs/ftpc_s$s.log 2>&1 & done

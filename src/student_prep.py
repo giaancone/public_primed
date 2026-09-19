@@ -11,8 +11,6 @@ Pure ASCII.
 """
 import numpy as np
 
-N_PRETRIGGER = 200          # length of the pre-trigger region, in samples
-
 
 def downsample(X, factor, mode="stride"):
     """Decimate a batch of waveforms `(n, L)` by `factor`.

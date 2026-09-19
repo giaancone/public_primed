@@ -28,7 +28,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .ft_finetune import _build_backbone, _amp_dtype, _autocast_ctx   # noqa: E402
+from .teacher import _build_backbone, _amp_dtype, _autocast_ctx   # noqa: E402
 
 
 class PeakCountModel(nn.Module):
@@ -165,7 +165,7 @@ def train_peakcount(X, ps_y, cnt_y, cfg, seed=0, fraction=100.0, device="cpu",
     n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
     n_total = sum(p.numel() for p in model.parameters())
     # uniform backbone LR by default; layer-wise LR decay if cfg['layer_lr_decay'] is set
-    from .ft_finetune import lr_param_groups
+    from .teacher import lr_param_groups
     opt = torch.optim.AdamW(lr_param_groups(head_params, model.backbone, cfg),
                             weight_decay=cfg.get("weight_decay", 0.01))
     epochs = int(cfg.get("epochs", 15))

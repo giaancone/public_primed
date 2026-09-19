@@ -1,6 +1,6 @@
 #!/bin/bash
 # Semi-supervised distillation sweep for the drift chamber: all fractions, both arms, 4 GPUs.
-# The dual-readout sweep is a separate driver, scripts/run_2species_students.sh.
+# The dual-readout sweep is a separate driver, scripts/run_dro_students.sh.
 #
 # What this runs. For each fraction f, the student gets truth labels on f% of the pool and the
 # teacher trained on that same f% supervises the rest. both arms run: distilled and its
@@ -22,8 +22,8 @@
 # flags any cell whose best epoch lands on the last epoch, which is the signature of
 # undertraining. If cells are flagged, raise epochs and re-run.
 #
-# Usage:  bash scripts/run_semi_sweep.sh
-#         bash scripts/run_semi_sweep.sh report
+# Usage:  bash scripts/run_dch_students.sh
+#         bash scripts/run_dch_students.sh report
 set -u -o pipefail
 MODE="${1:-run}"
 

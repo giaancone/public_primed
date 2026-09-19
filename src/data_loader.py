@@ -58,11 +58,11 @@ def _dch_window(wf, tt, tv, d):
     #
     # The student's input width is set here and nowhere else, so a run that omits it trains a
     # different architecture than the one being reported. `pool` defaults to "stride"; "max"
-    # is the peak-preserving alternative -- see liangyu_prep.downsample for the trade.
+    # is the peak-preserving alternative -- see student_prep.downsample for the trade.
     _ds = int(d.get("student_downsample", 1) or 1)
     if _ds > 1:
-        from src import liangyu_prep as _lprep
-        wf = _lprep.downsample(wf, _ds, mode=str(d.get("student_pool", "stride")))
+        from src import student_prep as _sprep
+        wf = _sprep.downsample(wf, _ds, mode=str(d.get("student_pool", "stride")))
         wf = np.ascontiguousarray(wf, dtype=np.float32)
     return wf, count
 

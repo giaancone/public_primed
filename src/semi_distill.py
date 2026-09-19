@@ -1,6 +1,6 @@
 """Semi-supervised distillation: supervise the student with the teacher on the unlabeled pool.
 
-`fs_baseline.train_student` consults the teacher only on the labeled events. At a small label
+`student.train_student` consults the teacher only on the labeled events. At a small label
 budget that is the regime where the teacher has least to add: its prediction on a labeled event
 is close to the label the student already has, and the feature term is matched on the same few
 events. Meanwhile the cache already holds teacher predictions and embeddings for every waveform
@@ -32,12 +32,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from src import fs_baseline as fs
+from src import student as st
 from src.metrics import regression_metrics
 
 
 def label_budget_split(n, fraction, seed, val_fraction):
-    """The same label-budget split `fs_baseline.train_student` uses, plus the unlabeled rest.
+    """The same label-budget split `student.train_student` uses, plus the unlabeled rest.
 
     Returns (tr_idx, val_idx, unl_idx). Validation is carved from inside the labeled budget,
     so a stated fraction is the total truth consumed, not the truth plus a separate val set.
@@ -89,8 +89,8 @@ def train_student_semi(X, y, teacher, cfg, seed=0, fraction=1.0, device="cpu", a
 
     cfg = dict(cfg)
     if str(cfg.get("input_norm", "per_event")).lower() == "global":
-        cfg["_x_scaler"] = fs.fit_global_minmax(X[tr_idx], cfg.get("minmax_hi_pct"))
-    Xs = fs._prep_inputs(X, cfg, cfg.get("_x_scaler"))
+        cfg["_x_scaler"] = st.fit_global_minmax(X[tr_idx], cfg.get("minmax_hi_pct"))
+    Xs = st._prep_inputs(X, cfg, cfg.get("_x_scaler"))
 
     t = lambda a: torch.as_tensor(a, dtype=torch.float32, device=device)   # noqa: E731
     Xpool, Tpool = t(Xs[pool_idx]), t(teacher[pool_idx])
@@ -112,10 +112,10 @@ def train_student_semi(X, y, teacher, cfg, seed=0, fraction=1.0, device="cpu", a
         te_pool = t(te_pool)
 
     torch.manual_seed(seed)
-    student = fs.build_model(cfg, Xs.shape[1], y.shape[1]).to(device)
+    student = st.build_model(cfg, Xs.shape[1], y.shape[1]).to(device)
     if str(cfg.get("frontend_init", "none")).lower() == "pca":
-        fs._init_frontend_pca(student, Xs[tr_idx])
-    fs.init_output_bias(student, cfg, y[tr_idx])
+        st._init_frontend_pca(student, Xs[tr_idx])
+    st.init_output_bias(student, cfg, y[tr_idx])
 
     projector, cap, hook = None, {}, None
     if do_feat:
@@ -136,7 +136,7 @@ def train_student_semi(X, y, teacher, cfg, seed=0, fraction=1.0, device="cpu", a
     opt = torch.optim.Adam(params, lr=cfg.get("lr", 1e-3))
     # Per-target loss weights. A single-target task wants a flat mean; a multi-target task
     # whose components live on very different scales needs cfg["target_weights"], the same
-    # weighting fs_baseline applies. Absent from the config -> flat mean.
+    # weighting student applies. Absent from the config -> flat mean.
     # Ratio-consistency knobs, read once; absent -> the term is inactive.
     _rw = float(cfg.get("ratio_weight", 0.0))
     _rc = cfg.get("ratio_cols")
@@ -180,7 +180,7 @@ def train_student_semi(X, y, teacher, cfg, seed=0, fraction=1.0, device="cpu", a
             if do_feat:
                 zs = projector(cap["f"])
                 zt = te_pool[b]
-                fl = ((fs._l2norm(zs) - fs._l2norm(zt)) ** 2).sum(dim=-1).mean()
+                fl = ((st._l2norm(zs) - st._l2norm(zt)) ** 2).sum(dim=-1).mean()
                 loss = loss + fw * min(1.0, step / warmup) * fl
             # Draw a label batch when either the truth term (alpha) or the ratio-consistency
             # term is active. Guarding on alpha alone would silently drop ratio-consistency at
@@ -194,12 +194,12 @@ def train_student_semi(X, y, teacher, cfg, seed=0, fraction=1.0, device="cpu", a
                 if a > 0.0:
                     loss = loss + a * mse(_pl, ytr[lb])
                 # Ratio-consistency, enabled by cfg ratio_weight/ratio_cols; a no-op when the
-                # config omits them. it must match the control arm. fs_baseline applies
+                # config omits them. it must match the control arm. student applies
                 # this term too, so omitting it here would leave the distilled arm as the only
                 # arm not optimizing the ratio, and the measured difference between arms would
                 # confound the teacher with a missing loss term.
                 # Label batch only: a teacher batch has no true ratio to be consistent with.
-                # Same stable cross-product form as fs_baseline:1126-1131 -- (pc*ts - ps*tc) is
+                # Same stable cross-product form as student:1126-1131 -- (pc*ts - ps*tc) is
                 # zero exactly when the c and s relative errors match (and so cancel in R = c/s),
                 # normalized by the batch-mean tc*ts so a near-zero true c or s cannot blow up.
                 if _rw > 0.0 and _rc is not None:
