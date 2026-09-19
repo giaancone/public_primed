@@ -1,0 +1,26 @@
+# Pruning, quantization-aware training and FPGA synthesis.
+#
+#   python -m venv .venv-compress && . .venv-compress/bin/activate
+#   pip install -r requirements-compress.txt
+#
+# Separate from requirements-train.txt on purpose: installing TensorFlow into the PyTorch
+# environment tends to break one or both.
+
+numpy
+h5py            # saved student models are HDF5
+
+# QKeras targets tf.keras, i.e. Keras 2. TensorFlow 2.16 switched the default to Keras 3,
+# under which the quantizer layers do not load. Stay below that boundary.
+tensorflow<2.16
+qkeras
+tensorflow-model-optimization
+
+# Pinned deliberately. scripts/qat_po2.py documents which source lines make power-of-two
+# weights emit a shift rather than a multiply (fpga_backend.py, quantizers.py, the QKeras
+# converter), and scripts/hls4ml_sweep.py relies on the generated build_prj.tcl being
+# editable between compile() and build(). Both were checked against this release; a different
+# one may move either.
+hls4ml==1.3.0
+
+# Synthesis additionally needs a Xilinx Vitis HLS installation on PATH. That is not a Python
+# package and is not installed by this file.

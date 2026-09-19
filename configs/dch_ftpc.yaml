@@ -1,0 +1,73 @@
+# Drift-chamber teacher and student configuration.
+#
+# The teacher is a fine-tuned foundation model with a multi-task head: N per-sample 3-class
+# labels (0 noise / 1 primary / 2 secondary) plus one primary-cluster count, which is the
+# reported quantity. Full non-truncated waveforms.
+#
+# parallel training -- each (fraction, seed) is independent, so run one process per GPU.
+# Seed-parallel on a 4-GPU node:
+#   export HF_HOME=<cache_dir>/hf_cache; mkdir -p logs
+#   for s in 0 1 2; do
+#     CUDA_VISIBLE_DEVICES=$s nohup python scripts/train_ftpc.py --config configs/dch_ftpc.yaml \
+#       --root $DCH --device cuda --verbose --seeds $s --resume \
+#       --ckpt-dir <ckpt_dir> --out runs/dch_ftpc_s$s.json \
+#       > logs/ftpc_s$s.log 2>&1 & done
+#   # --resume + per-(frac,seed) checkpoints => a killed/timed-out job restarts
+#   # from its last epoch and skips finished cells. JSON is written after each cell.
+#   # merge: python -c "import json;R=[];[R.extend(json.load(open('runs/dch_ftpc_s%d.json'%s))['runs']) for s in(0,1,2)];d=json.load(open('runs/dch_ftpc_s0.json'));d['runs']=sorted(R,key=lambda r:(r['fraction'],r['seed']));json.dump(d,open('runs/dch_ftpc.json','w'),indent=2)"
+# Even finer: split fractions too (--fractions 100 --seeds 0 per GPU) for 4x on the
+# expensive 100% cells. Local plumbing check (no GPU/TimesFM):  add --stub
+# Pure ASCII.
+
+dataset: dch
+
+data:
+  train_glob: "processed_data_train/*.npz"
+  test_glob:  "processed_data_test/*.npz"
+  wf_key:        "wf_i"
+  tag_times_key: "tag_times"
+  tag_values_key: "tag_values"
+  mom_key:       "mom"
+  truncate_samples: null     # FULL waveform (~3000 samples) -- no truncation
+  pad_multiple: 32           # pad to a multiple of the TimesFM patch (3000 -> 3008)
+  target: count
+  n_targets: 1
+
+ftpc:
+  checkpoint: "google/timesfm-2.5-200m-pytorch"
+  freeze: last_n             # partial fine-tune -- the only supported setting
+  freeze_n: 2
+  head_hidden: [128]         # count-head MLP width
+  n_classes: 3               # per-sample: 0 noise / 1 primary / 2 secondary
+  patch: 32
+  lr: 0.0001                 # backbone LR
+  head_lr: 0.001             # head LR (higher; fresh head)
+  weight_decay: 0.01
+  epochs: 4
+  batch_size: 128            # this path bypasses compile(), so batch size is a free speed
+                             # lever. Watch VRAM at the 3008-sample context and lower it if
+                             # the run OOMs (override live with --batch-size).
+  val_fraction: 0.1
+  # --- multi-task loss weights ---
+  count_weight: 1.0          # weight on the count-cell MSE (per-sample CE weight = 1)
+  consistency_weight: 0.0    # OFF. While the peak map is still over-predicting early in
+                             # training this term dominates the loss and drags the count head
+                             # toward the map's error rather than the truth. Toggleable.
+  consistency_warmup: 0.3    # ramp consistency 0->weight over first 30% of steps
+  class_weighted: true       # inverse-freq class weights (peaks are ~2-3% of samples)
+  ckpt_every: 1
+  fractions: [0.1, 1, 10, 100]
+  seeds: [0, 1, 2]
+
+fc_little: {arch: fc, hidden: [16, 24, 8], epochs: 60, lr: 0.001, batch_size: 256, val_fraction: 0.1, fractions: [0.1, 1, 10, 100], seeds: [0, 1, 2], input_norm: global, feat_tap: front, frontend_init: pca}
+
+eval:
+  metric: separation_power
+  momentum: 10.0
+  mom_tol: 0.25
+  kaon_glob: "kaon/*.npz"
+  pion_glob: "pion/*.npz"
+  # Track-length scaler: sqrt(track length / cell size), here 1 m over a 1.8 cm cell.
+  # This sets the geometry the metric is quoted for. Two numbers computed with
+  # different length_scale values are not comparable.
+  length_scale: 7.454

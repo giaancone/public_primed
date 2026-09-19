@@ -1,0 +1,114 @@
+# teacher config for the dual-readout task: both species, full-resolution waveform.
+#
+# The published baseline trains, validates and tests on e- and kaon0L merged. The C/S ratio is
+# itself the hadron/em discriminant, so the merged target is bimodal across species and is a
+# strictly harder regression than either species alone -- a model trained on one species is not
+# comparable to that baseline.
+#
+#   run:
+#     export HDF5_USE_FILE_LOCKING=false
+#     export HF_HOME=<cache_dir>/hf_cache HF_HUB_OFFLINE=1
+#     python scripts/train_ft_dro.py --config configs/dro_bso_ft_2species.yaml \
+#       --root $DRO --device cuda --verbose --seeds 0,1,2 --resume \
+#       --ckpt-dir <ckpt_dir> --epochs-per-run 1 \
+#       --out runs/dro_ft_2species.json
+#
+#   One process over all cells, one --out, one --ckpt-dir. Do not split seeds across
+#   concurrent jobs sharing an --out or --ckpt-dir: they share the .pt, the .pt.tmp and the
+#   JSON, and last-writer-wins silently discards a whole chunk. To parallelize across GPUs,
+#   give each job its own --out and its own --ckpt-dir.
+#
+#   What --epochs-per-run 1 actually does. It does not train one epoch and exit. One
+#   invocation trains one epoch of every not-yet-complete cell, so with 3 seeds x 4 fractions
+#   the cost is dominated by three full fraction-100 epochs. Size the job for that, not for
+#   "one epoch". Mid-epoch checkpoints bound the loss if it is killed partway.
+#
+# Before the first run, verify the data (CPU only):
+#     ls -d $DRO/BSO/t0_+-2.5/BSO_*_10GeV_*/
+#   This must list exactly the two species directories. If anything else appears, the wildcard
+#   below over-matches and needs narrowing. Confirm both species have the same raw waveform
+#   length: the loader pads or truncates to context_len silently, so two different raw lengths
+#   would be harmonized with nothing flagging it.
+
+dataset: dro
+name: dro_bso_ft_2species
+
+data:
+  # Both species. The loader concatenates files in sorted glob order and is species-agnostic,
+  # reading `waveform` and `labels[:, :3]`, so no loader change is needed. Expected pool:
+  # ~200,000 events.
+  train_glob: "BSO/t0_+-2.5/BSO_*_10GeV_*/batch_waveforms_*.h5"
+  test_glob:  "BSO/t0_+-2.5/BSO_*_10GeV_*/batch_waveforms_*.h5"
+  wf_key:     "waveform"
+  labels_key: "labels"
+  downsample: 1             # FULL resolution -- the teacher sees the whole waveform
+  context_len: 6272         # ~6246-sample waveform padded to 196*32 (TimesFM patch multiple)
+  target_indices: [0, 1, 2]
+  target_names: ["c", "s", "t0"]
+
+  # Per-crystal target divisors.
+  # The divisor enters the loss squared -- loss = sum_i (w_i / D_i^2) * delta_i^2 -- so
+  # it sets the objective, not just the units. The effective emphasis on target i is
+  # w_i * (mean_i / D_i)^2, and a divisor fitted for a different crystal can suppress a
+  # component's weight by more than an order of magnitude. err68 is divisor-invariant, so such
+  # a mistake leaves every reported number looking untouched while the objective is skewed.
+  # Change target_divisors and target_weights together or not at all.
+  target_divisors: [500.0, 220.0, 2.5]
+  n_targets: 3
+
+ft:
+  checkpoint: "google/timesfm-2.5-200m-pytorch"
+  freeze: last_n            # partial fine-tune: last `freeze_n` blocks + head (~20M of 231M)
+  freeze_n: 2
+  head_hidden: [128]        # 1280 -> 128 -> 3
+  lr: 0.0001                # backbone LR
+  head_lr: 0.001            # head LR (fresh head, higher)
+  weight_decay: 0.01
+  epochs: 4
+  batch_size: 8             # 6272 ctx is ~10x heavier than 640; raise only if VRAM allows
+
+  # These weights are paired with the divisors above. The two together set the
+  # effective emphasis per target, so a weighting taken from a run with different divisors will
+  # be badly wrong here -- and wrong in a direction that no reported number reveals, since
+  # err68 is divisor-invariant. The divisor and the weight are one decision, not two.
+  target_weights: [4.0, 1.0, 0.3]
+
+  val_fraction: 0.1
+  ckpt_every: 1             # checkpoint at EVERY epoch boundary
+
+  # WALL-CLOCK checkpoints -- what bounds lost work under a job time limit. Saves whenever
+  # this many minutes have passed, at a clean grads-zeroed micro-batch boundary, with the loss
+  # history attached; resume is micro-batch exact.
+  #
+  # Preferred over a per-epoch checkpoint count, which requires knowing the epoch time in
+  # advance, breaks when that time shifts, and becomes impossible once the validation pass
+  # alone exceeds the target interval. A wall-clock interval needs no such knowledge and still
+  # fires on small cells, where a per-epoch count self-disables.
+  ckpt_minutes: 20
+  fractions: [0.1, 1, 10, 100]
+  # three seeds, matching the published baseline's seed count, so the same statistic can be
+  # reported and a spread is available rather than a single point.
+  #
+  # This is 3x the GPU cost. 4 epochs x (18 + 180 + 1800 + 18000) = 79,992 micro-batches
+  # per seed. (An earlier note said 89,000 -- that forgot the 20%
+  # holdout, which takes the pool from 200,000 to 160,000 before the fraction is applied.)
+  #
+  # Seeds are for spread, not for ensembling. Distillation must still take its targets
+  # from one teacher checkpoint (project rule: never ensemble teacher seeds). Training three
+  # and reporting their spread is a different thing from averaging three into one teacher --
+  # pick one seed for the cache and say which.
+  seeds: [0, 1, 2]
+
+eval:
+  metric: err68             # documentation only -- no code reads this key
+  holdout_fraction: 0.2     # 20% of the MERGED pool, carved with default_rng(12345)
+  # Note on the split. The published baseline carves 20% per species and stacks them, giving
+  # an exact 50/50 mix. This carves a single 20% of the merged pool, so the species balance is
+  # 50% to within a fraction of a percent on ~40,000 events. Distributionally equivalent; an
+  # exact split is not reproducible across different RNGs in any case.
+  #
+  # These two are not used for training -- they are the optional --external-eval slices only.
+  # Both are now subsets of train_glob, so --external-eval would not be leak-free here.
+  # do not pass --external-eval with this config.
+  electron_glob: "BSO/t0_+-2.5/BSO_e-_10GeV_*/batch_waveforms_*.h5"
+  kaon_glob:     "BSO/t0_+-2.5/BSO_kaon0L_10GeV_*/batch_waveforms_*.h5"

@@ -1,0 +1,94 @@
+# student config for the dual-readout task, both species.
+#
+# The published baseline is measured on e- and kaon0L merged, so a student trained or scored on
+# one species alone is not comparable to it. The teacher config that pairs with this one is
+# configs/dro_bso_ft_2species.yaml.
+#
+#   step 1 -- cache teacher predictions:
+#
+#      python -u scripts/cache_teacher_preds.py \
+#        --config configs/dro_bso_ft_2species.yaml \
+#        --root $DRO --scheme ft --device cuda --batch 16 \
+#        --teacher <ckpt_dir>/ftdro_f<frac>_s<seed>.pt \
+#        --out <cache_dir>/tcache_dro2sp_f<frac>_s<seed>.npz
+#
+#      One cache per fraction, from the FRACTION-MATCHED teacher. The f1 student must
+#      use the f1 teacher. Passing the 100%-label cache to every fraction leaks label
+#      information into the low-fraction points.
+#
+#      The cache is built with the TEACHER's config (context_len 6272) while the student loads
+#      this one. That is correct: only the row count and the targets have to match, and both
+#      configs carry the same divisors.
+#
+#   step 2 -- train the student:
+#
+#      python -u scripts/train_distill.py \
+#        --config configs/dro_bso_2species.yaml --root $DRO --scheme fc_little \
+#        --downsample 10 --context-len 628 \
+#        --teacher-preds <cache_dir>/tcache_dro2sp_f<frac>_s<seed>.npz \
+#        --semi --distill-mode both --alpha 0.5 --feat-weight 0.001 --feat-center mean \
+#        --label-seed <seed> --select-best-val --steps 140000 --batch-size 256 \
+#        --fractions <frac> --seeds 0,1,2,3,4,5,6,7 \
+#        --save-students runs/students/dro2sp_f<frac>_distill \
+#        --device cuda --out runs/dro2sp_semi_f<frac>.json
+#
+#      --Label-seed must match the teacher's seed. A teacher's labeled subset comes
+#      from its run seed, so different teacher seeds saw different events. A mismatch trains
+#      the student on events its teacher never saw and reopens the ~2f% label double-count.
+#
+#      --Context-len 628 is deliberate. 628 gives the 10,699-parameter model; this
+#      config's 640 gives 10,891. Both hold the same 625 real samples and differ only in
+#      padding, so a run that omits the flag trains a different architecture without failing.
+#
+#      The control arm is the same command with `--distill-mode labels` and no `--semi`, with
+#      batch and epochs computed per cell to match the same 140,000 updates.
+
+dataset: dro
+name: dro_bso_2species
+
+data:
+  # Both species: the glob matches the e- and kaon0L directories, 100,000 events each.
+  # Pool 200,000 -> 40,000 holdout / 160,000 train.
+  train_glob: "BSO/t0_+-2.5/BSO_*_10GeV_*/batch_waveforms_*.h5"
+  test_glob:  "BSO/t0_+-2.5/BSO_*_10GeV_*/batch_waveforms_*.h5"
+  wf_key:     "waveform"        # (N, 6246) summed SiPM waveform
+  labels_key: "labels"          # (N, >=3) = [c, s, t0]
+  downsample: 10                # to the benchmark sampling rate
+  context_len: 640              # Pass --context-len 628 on the CLI; see above
+  target_indices: [0, 1, 2]
+  target_names: ["c", "s", "t0"]
+
+  # Per-crystal target divisors.
+  # The divisor enters the loss squared, so it is part of the objective. The effective
+  # emphasis on target i is w_i * (mean_i / D_i)^2, so a divisor and its weight are one
+  # decision -- changing either alone reweights the objective. err68 is divisor-invariant for
+  # c, s and the ratio, so a mis-set divisor skews training while every reported number still
+  # looks correct.
+  # Must match the teacher config and the cache, or the alignment check fails.
+  target_divisors: [500.0, 220.0, 2.5]
+  n_targets: 3
+
+# --- fc_little: the student. 628-16-24-8-3 with --context-len 628, global min-max scaling, a
+# PCA-initialized front end, and a ratio-consistency term on the labeled batch.
+#
+# target_weights must be derived together with target_divisors above -- see that note. The
+# values here are balanced for these divisors.
+#
+# ratio_weight / ratio_cols add a cross-product consistency penalty on the labeled batch. The
+# reported metric is the C/S ratio, but the loss regresses [c, s, t0] individually and the
+# ratio is not otherwise a term in it. The control arm applies the same term, so the
+# two arms differ only in the teacher.
+fc_little: {arch: fc, hidden: [16, 24, 8], epochs: 60, lr: 0.001, batch_size: 256, val_fraction: 0.1, target_weights: [4.0, 1.0, 0.3], fractions: [0.1, 1, 10, 100], seeds: [0, 1, 2, 3, 4, 5, 6, 7], input_norm: global, feat_tap: front, frontend_init: pca, ratio_weight: 0.3, ratio_cols: [0, 1]}
+
+eval:
+  metric: err68
+  holdout_fraction: 0.2         # 20% of the merged pool, carved with default_rng(12345)
+
+  # These slices are subsets of train_glob, not HELD-OUT sets.
+  # With the merged glob both species are part of training, so neither is an unseen sample.
+  # do not pass --external-eval / --eval-cache / --eval-kaon-cache with this config.
+  # They are kept only so a per-species breakdown of the merged holdout can be built later.
+  # Nothing in the loader records species membership, so such a breakdown must be re-derived
+  # from sorted file order and per-file counts.
+  electron_glob: "BSO/t0_+-2.5/BSO_e-_10GeV_*/batch_waveforms_*.h5"
+  kaon_glob:     "BSO/t0_+-2.5/BSO_kaon0L_10GeV_*/batch_waveforms_*.h5"

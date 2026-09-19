@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.venv*/
+runs/
+compress_cache/
+*.npz
+*.h5
+*.pt
