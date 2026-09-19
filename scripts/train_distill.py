@@ -345,7 +345,7 @@ def resolve_arm(mode, alpha, feat_weight):
 def split_pika(X, sel_val_frac):
     """Split the pion and kaon evaluation sets into a selection and a test half.
 
-    This is A comparability requirement, not A nicety. When a seed or an epoch is
+    This is a comparability requirement, not a nicety. When a seed or an epoch is
     chosen using the evaluation sets, the reported number must come from events that played no
     part in that choice. This holds back a disjoint fraction for selection and scores on the
     rest. Scoring on all events instead computes a different number on a superset that includes

@@ -16,7 +16,7 @@
 # steps, so the difference between them measures the teacher and not the schedule.
 #
 # Prerequisites -- both are hard failures if missed.
-#   1. Teacher caches, One per fraction, from the FRACTION-MATCHED seed-1 teacher:
+#   1. Teacher caches, one per fraction, from the FRACTION-MATCHED seed-1 teacher:
 #        bash scripts/run_dro_students.sh cache
 #      The f1 student must use the f1 teacher. Passing the 100%-label cache to every fraction is
 #      Passing the 100%-label cache to every fraction leaks label information into the
@@ -30,7 +30,7 @@
 #   bash scripts/run_dro_students.sh cache     # step 1: build the 4 teacher caches
 #   bash scripts/run_dro_students.sh budget    # print the computed control budgets, no run
 #   bash scripts/run_dro_students.sh           # step 2: the sweep (4 GPUs)
-#   bash scripts/run_dro_students.sh report    # summarise whatever exists
+#   bash scripts/run_dro_students.sh report    # summarize whatever exists
 #
 # Run it in the foreground inside tmux or screen. Backgrounding returns the shell to its
 # prompt, and a login-timeout on a batch system will then release the allocation and kill the
@@ -71,7 +71,7 @@ import math, sys
 frac, pool, target = float(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
 n_lab = max(int(round(pool * frac / 100.0)), 32)
 n_tr  = max(n_lab - max(int(round(n_lab * 0.1)), 8), 8)
-# The batch shrink is deliberate -- this is A GOOD-FAITH baseline, not A matched arm.
+# The batch shrink is deliberate -- this is a good-faith baseline, not a matched arm.
 # Considered and rejected: fixing batch at 256 to match the distill arm exactly.
 # It sounds like the cleaner experiment, but at 0.1% there are only 144 training events, so
 # batch 256 is the whole set -- one batch per epoch, deterministic full-batch gd, zero

@@ -271,13 +271,12 @@ def predict(model, X, device="cpu", batch=4096, cfg=None, scaler=None):
 # --------------------------------------------------------------------------- #
 # Weight persistence + knowledge distillation.                                #
 #                                                                             #
-# `train_fs.py --save-weights` calls save_model() to persist a trained net    #
-# (state_dict + the arch cfg + input length + n_targets), so it reloads with  #
-# zero guesswork via load_model() -- used to capture the `st` teacher so we    #
-# never re-pay the GPU cost. train_student() then distills that teacher into a #
-# tiny student: loss = alpha * (student vs true label) + (1-alpha) * (student  #
-# vs TEACHER's soft prediction). Same eval/metric as `fs`, so the distilled    #
-# student drops onto the same figure as a new `sd` line.                       #
+# save_model() persists a trained net (state_dict + the arch cfg + input      #
+# length + n_targets) so it reloads with no guesswork via load_model(). That  #
+# is how a trained teacher is captured once rather than re-paying the GPU     #
+# cost on every run. train_student() then distills it into a small student:   #
+# loss = alpha * (student vs true label) + (1 - alpha) * (student vs the      #
+# teacher's prediction), scored with the same metric as the control arm.      #
 # --------------------------------------------------------------------------- #
 def save_model(path, model, arch_cfg, length, n_targets, meta=None):
     """Persist a from-scratch model so load_model() can rebuild it exactly.
@@ -688,7 +687,7 @@ def train_student(X, y, teacher, cfg, seed=0, fraction=100.0, device="cpu",
         #   "penult"/"last"/None (default, unchanged) -> hook the input to the last Linear
         #     = the penultimate features. For a funnel (e.g. 16-24-8-3) this is the narrow
         #     8-dim waist -- forcing it to mimic a 1280-d teacher embedding strangles the
-        #     bottleneck (the tiny-student 6.998 failure, DISTILL_4ARM / EXPERIMENT_DEEPDIVE).
+        #     bottleneck (a measured failure mode).
         #   "front"/"wide"/<int k> -> hook the output of an early (wide) Linear (front-end,
         #     index k, default 0), so the teacher's representation gradient reaches the trunk
         #     without passing through the waist. This is the training-only auxiliary head

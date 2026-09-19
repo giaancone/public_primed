@@ -272,7 +272,7 @@ def main():
                     cfg["LayerName"][lname]["Strategy"] = a.strategy
             if a.force_lut:
                 cfg["Model"]["DSPUsage"] = 0          # ignored by Vitis; the Tcl does the work
-            # nb: precision is normally taken From the qkeras quantizers by
+            # nb: precision is normally taken from the qkeras quantizers by
             # config_from_keras_model -- do not override it, or the synthesised precision
             # stops matching the precision the accuracy numbers were validated at. The one
             # exception is the explicitly-labeled --precision-override diagnostic below.

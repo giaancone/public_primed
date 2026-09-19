@@ -189,7 +189,7 @@ def load_dch_concat(config, root, split="train", eval_set=None,
 # truncated to a fixed multiple of the backbone's patch size, and each target is divided
 # by a fixed divisor so the MSE is balanced across components.
 #
-# The divisor is part of the objective, not just A unit change. It enters the loss
+# The divisor is part of the objective, not just a unit change. It enters the loss
 # squared, so the effective weight on target i is w_i * (mean_i / D_i)^2. err68 is
 # divisor-invariant, so a mis-set divisor skews training while every reported number still
 # looks correct -- change `target_divisors` and `target_weights` together or not at all.

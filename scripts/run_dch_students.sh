@@ -60,7 +60,7 @@ LABEL_SEED="${LABEL_SEED:-0}"
 TAG="${TAG:-}"
 FEATW="${FEATW:-0.001}"
 EPOCHS="${EPOCHS:-300}"
-# Prefer A fixed step budget over an epoch count. An epoch is one pass over the pool,
+# Prefer a fixed step budget over an epoch count. An epoch is one pass over the pool,
 # so --epochs means a different amount of training per detector and per pool size. --steps
 # overrides it inside train_student_semi and gives every cell the same optimizer budget, which
 # is what makes the two detectors comparable. Empty = use epochs. Applies to the --semi arm
@@ -110,7 +110,7 @@ one() {
   #   DRO 6272 / 10 -> 640
   # It does not touch the teacher: the cache was built at full resolution and is row-aligned.
   # Detector protocol flags -- these decide whether the numbers are comparable at all.
-  # DCH, from the published sweep (run_dch_little_sweep.sh:145-152 and 278-279):
+  # DCH, from the published sweep:
   #   --sel-val-frac 0.3   hold back a disjoint selection split; the metric is quoted on the
   #                        remaining test events. without it the metric is computed over all
   #                        events, no validation metric is recorded, and the number is not
@@ -123,8 +123,8 @@ one() {
   #                        affect comparability: sigma is measured on the separate pi/ka eval
   #                        files, and --max-events only changes how much unlabeled pool the
   #                        student gets -- more of which is the entire point of --semi.
-  # DRO deliberately gets none of these -- run_dro_little_scan.sh:132: "no --count-divisor
-  # (DCH-only) and no --sel-val-frac (DRO uses a random holdout)".
+  # DRO deliberately gets none of these: no --count-divisor
+  # (DCH-only) and no --sel-val-frac (DRO uses a random holdout).
   local ds extra=()
   cfg=configs/dch_ftpc.yaml; root="$DCH"; ds=5
   extra=(--count-divisor 53 --sel-val-frac 0.3)
@@ -140,7 +140,7 @@ one() {
   fi
   # --steps is a train_student_semi parameter; the control arm goes through fs.train_student,
   # which has no such knob, so it keeps using --epochs.
-  # The control needs A matched update budget, not A fixed epoch count.
+  # The control needs a matched update budget, not a fixed epoch count.
   # fs.train_student has no --steps, so the control is sized in epochs -- but its labeled set
   # varies 1000x across fractions, so any single epoch count is wrong at one end:
   #     --epochs 300 -> DCH 100% control got 527k updates (5x the distilled arm)

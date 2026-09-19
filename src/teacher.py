@@ -15,7 +15,7 @@ this checkpoint loads:
      `timesfm.TimesFM_2p5_200M_torch.from_pretrained`.
   2. A regression head is driven off the last-layer hidden states instead of the
      forecasting loss.
-  3. Call `forward()` directly for A differentiable encode. The package's
+  3. Call `forward()` directly for a differentiable encode. The package's
      `forecast()` / `model.decode()` path is wrapped in `torch.no_grad()` and crosses a
      numpy boundary, so no gradient reaches the backbone through it -- captured hidden
      states come back with `requires_grad=False`. See TimesFMBackbone, which reimplements

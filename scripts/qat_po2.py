@@ -1,6 +1,6 @@
 """Power-of-two quantization-aware training: the route to DSP = 0.
 
-Why POWER-OF-TWO and not A narrower fixed point. This is a structural property of
+Why POWER-OF-TWO and not a narrower fixed point. This is a structural property of
 hls4ml, not a tuning outcome. In hls4ml 1.3.0:
 
     hls4ml/backends/fpga/fpga_backend.py:504
@@ -209,7 +209,7 @@ def train_qat_weighted(qat_model, masks, lr, datasets, epochs, batch_size, patie
 
 
 def build_po2_qat(fp_model, po2_bits, bias_bits=(12, 2), kernel="po2", po2_layers=None):
-    """Mirror of compress.py:_create_qat_model with a PO2 kernel quantizer.
+    """Mirrors the reference QAT model builder, with a PO2 kernel quantizer.
 
     Structure (layer order, bn placement, weight transfer, mask capture) follows the reference
     function so the only difference from the <12,2> arm is `kernel_quantizer`. Returns
@@ -219,7 +219,7 @@ def build_po2_qat(fp_model, po2_bits, bias_bits=(12, 2), kernel="po2", po2_layer
     from qkeras import QDense, QActivation, quantized_bits, quantized_relu
     from qkeras.quantizers import quantized_po2
 
-    # kernel="bits" reproduces the <12,2> arm through This exact code path. That matters more
+    # kernel="bits" reproduces the <12,2> arm through this exact code path. That matters more
     # than it sounds: the archived <12,2> DCH artifacts turned out to be from the superseded
     # RAW-COUNT run and score NaN, and the cdiv53 sp50 model was lost with /tmp. Regenerating
     # both arms here means the comparison depends on no missing file and differs in exactly
@@ -316,7 +316,7 @@ def audit_po2(model, masks=None):
 
 
 def score(detector, model, cache, meta):
-    """Same metric, same arrays, same code path as make_compressed_plot_series.py."""
+    """Same metric, same arrays, and same code path as the training-time evaluation."""
     from src import dro_metric, separation as sepmod
     if detector == "dch":
         ls = float(meta["length_scale"])
@@ -435,7 +435,7 @@ def main():
 
     # ---- species + LOSS-BALANCE guards (DRO) --------------------------------------------
     if a.detector == "dro":
-        # 1. Which species is this cache? Written by export_compress_cache_nersc.py. Older
+        # 1. Which species is this cache? Written by the cache exporter. Older
         #    caches predate the key; absent is not proof of anything, so say so and move on.
         nsp = meta.get("n_species")
         if nsp is None:
