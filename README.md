@@ -47,6 +47,10 @@ but the `timesfm` package version is not: `ft_finetune.py` uses internals of
 `timesfm.torch.util`, so a different release may change preprocessing or fail
 outright. Pin it to the version you used.
 
+## License
+
+Released under the Apache License 2.0; see `LICENSE`.
+
 ## Data
 
 Not included. The DCH inputs are `.npz` files holding a waveform array plus
